@@ -1,0 +1,35 @@
+-- Order Execution Engine Database Schema
+
+CREATE TABLE IF NOT EXISTS orders (
+  id VARCHAR(255) PRIMARY KEY,
+  userId VARCHAR(255) NOT NULL,
+  tokenIn VARCHAR(255) NOT NULL,
+  tokenOut VARCHAR(255) NOT NULL,
+  amountIn VARCHAR(255) NOT NULL,
+  minAmountOut VARCHAR(255) NOT NULL,
+  status VARCHAR(50) NOT NULL DEFAULT 'pending',
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_userId (userId),
+  INDEX idx_status (status)
+);
+
+CREATE TABLE IF NOT EXISTS execution_results (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  orderId VARCHAR(255) NOT NULL,
+  amountOut VARCHAR(255),
+  transactionHash VARCHAR(255),
+  success BOOLEAN NOT NULL,
+  error TEXT,
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (orderId) REFERENCES orders(id)
+);
+
+CREATE TABLE IF NOT EXISTS execution_logs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  orderId VARCHAR(255),
+  message TEXT NOT NULL,
+  level VARCHAR(50),
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_orderId (orderId)
+);

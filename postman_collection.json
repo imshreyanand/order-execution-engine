@@ -1,0 +1,46 @@
+{
+  "info": {
+    "name": "Order Execution Engine API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "url": "http://localhost:3000/health"
+      }
+    },
+    {
+      "name": "Create Order",
+      "request": {
+        "method": "POST",
+        "url": "http://localhost:3000/orders",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"userId\": \"0x...\", \"tokenIn\": \"0x...\", \"tokenOut\": \"0x...\", \"amountIn\": \"1000000000000000000\", \"minAmountOut\": \"900000000000000000\"}"
+        }
+      }
+    },
+    {
+      "name": "Get Order",
+      "request": {
+        "method": "GET",
+        "url": "http://localhost:3000/orders/{{orderId}}"
+      }
+    },
+    {
+      "name": "List Orders",
+      "request": {
+        "method": "GET",
+        "url": "http://localhost:3000/orders"
+      }
+    }
+  ]
+}
