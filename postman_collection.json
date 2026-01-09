@@ -1,21 +1,55 @@
 {
   "info": {
     "name": "Order Execution Engine API",
+    "description": "Complete API collection for testing the DEX order execution engine",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "order_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
   "item": [
     {
       "name": "Health Check",
       "request": {
         "method": "GET",
-        "url": "http://localhost:3000/health"
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": ["{{base_url}}"],
+          "path": ["health"]
+        },
+        "description": "Check if server is running"
       }
     },
     {
-      "name": "Create Order",
+      "name": "Submit Market Order (SOL → USDC)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// Extract orderId from response and save",
+              "const response = pm.response.json();",
+              "if (response.orderId) {",
+              "    pm.collectionVariables.set('order_id', response.orderId);",
+              "    console.log('Order ID saved:', response.orderId);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
       "request": {
         "method": "POST",
-        "url": "http://localhost:3000/orders",
         "header": [
           {
             "key": "Content-Type",
@@ -24,22 +58,128 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\"userId\": \"0x...\", \"tokenIn\": \"0x...\", \"tokenOut\": \"0x...\", \"amountIn\": \"1000000000000000000\", \"minAmountOut\": \"900000000000000000\"}"
+          "raw": "{\n  \"orderType\": \"market\",\n  \"tokenIn\": \"SOL\",\n  \"tokenOut\": \"USDC\",\n  \"amountIn\": 1.5,\n  \"slippage\": 0.01\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/orders/execute",
+          "host": ["{{base_url}}"],
+          "path": ["api", "orders", "execute"]
+        },
+        "description": "Submit a market order to swap 1.5 SOL for USDC"
+      }
+    },
+    {
+      "name": "Submit Market Order (USDC → SOL)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"orderType\": \"market\",\n  \"tokenIn\": \"USDC\",\n  \"tokenOut\": \"SOL\",\n  \"amountIn\": 100,\n  \"slippage\": 0.015\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/orders/execute",
+          "host": ["{{base_url}}"],
+          "path": ["api", "orders", "execute"]
+        },
+        "description": "Submit a market order to swap 100 USDC for SOL with 1.5% slippage"
+      }
+    },
+    {
+      "name": "Get Order Status",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/orders/{{order_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "orders", "{{order_id}}"]
+        },
+        "description": "Check the status of a specific order using its orderId"
+      }
+    },
+    {
+      "name": "List All Orders",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/orders?limit=20&offset=0",
+          "host": ["{{base_url}}"],
+          "path": ["api", "orders"],
+          "query": [
+            {
+              "key": "limit",
+              "value": "20"
+            },
+            {
+              "key": "offset",
+              "value": "0"
+            }
+          ]
+        },
+        "description": "Retrieve a paginated list of all orders"
+      }
+    },
+    {
+      "name": "Submit Large Order (Test Slippage)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"orderType\": \"market\",\n  \"tokenIn\": \"SOL\",\n  \"tokenOut\": \"USDC\",\n  \"amountIn\": 50,\n  \"slippage\": 0.02\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/orders/execute",
+          "host": ["{{base_url}}"],
+          "path": ["api", "orders", "execute"]
+        },
+        "description": "Submit a larger order to test slippage protection (2%)"
+      }
+    },
+    {
+      "name": "Batch: Submit 5 Concurrent Orders",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "// This demonstrates concurrent order submission",
+              "// Run this 5 times in quick succession to test queue"
+            ],
+            "type": "text/javascript"
+          }
         }
-      }
-    },
-    {
-      "name": "Get Order",
+      ],
       "request": {
-        "method": "GET",
-        "url": "http://localhost:3000/orders/{{orderId}}"
-      }
-    },
-    {
-      "name": "List Orders",
-      "request": {
-        "method": "GET",
-        "url": "http://localhost:3000/orders"
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"orderType\": \"market\",\n  \"tokenIn\": \"SOL\",\n  \"tokenOut\": \"USDC\",\n  \"amountIn\": {{$randomInt}},\n  \"slippage\": 0.01\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/orders/execute",
+          "host": ["{{base_url}}"],
+          "path": ["api", "orders", "execute"]
+        },
+        "description": "Submit random amount order - run this 5 times quickly to test concurrent processing"
       }
     }
   ]
