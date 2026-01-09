@@ -79,7 +79,7 @@ export interface ExecutionResult {
   error?: string;
 }
 
-// Job data for BullMQ
+// Job data for background worker
 export interface OrderJob {
   orderId: string;
   orderData: CreateOrderRequest;

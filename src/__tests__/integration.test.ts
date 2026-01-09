@@ -1,28 +1,20 @@
-import { Queue } from 'bullmq';
 import DatabaseService from '../services/database';
-import { CreateOrderRequest, OrderJob } from '../types';
-
-// Mock Redis connection for tests
-const mockRedisConnection = {
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379')
-};
+import { CreateOrderRequest } from '../types';
+import QueueWorker from '../services/queueWorker';
 
 describe('Integration Tests', () => {
   let db: DatabaseService;
-  let queue: Queue<OrderJob>;
+  let worker: QueueWorker;
   
   beforeAll(async () => {
     db = new DatabaseService();
     await db.initialize();
     
-    queue = new Queue<OrderJob>('order-execution-test', {
-      connection: mockRedisConnection
-    });
+    worker = new QueueWorker(db);
   });
   
   afterAll(async () => {
-    await queue.close();
+    await worker.close();
     await db.close();
   });
   
@@ -119,7 +111,17 @@ describe('Integration Tests', () => {
   });
   
   describe('Queue Operations', () => {
-    it('should add job to queue', async () => {
+    const waitForStatus = async (orderId: string, timeout = 10000) => {
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        const order = await db.getOrder(orderId);
+        if (order && order.status !== 'pending') return order;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      throw new Error('Timeout waiting for order status change');
+    };
+
+    it('should enqueue and process a job', async () => {
       const orderId = `TEST-QUEUE-${Date.now()}`;
       const orderData: CreateOrderRequest = {
         orderType: 'market',
@@ -127,70 +129,37 @@ describe('Integration Tests', () => {
         tokenOut: 'USDC',
         amountIn: 1
       };
-      
-      const job = await queue.add(
-        `order-${orderId}`,
-        { orderId, orderData }
-      );
-      
-      expect(job.id).toBeDefined();
-      expect(job.data.orderId).toBe(orderId);
+
+      await db.createOrder(orderId, orderData);
+      worker.enqueue(orderId, orderData);
+
+      const processed = await waitForStatus(orderId, 15000);
+      expect(['confirmed', 'failed', 'submitted']).toContain(processed.status);
     });
-    
-    it('should configure job with retry settings', async () => {
-      const orderId = `TEST-RETRY-${Date.now()}`;
-      const orderData: CreateOrderRequest = {
-        orderType: 'market',
-        tokenIn: 'SOL',
-        tokenOut: 'USDC',
-        amountIn: 1
-      };
-      
-      const job = await queue.add(
-        `order-${orderId}`,
-        { orderId, orderData },
-        {
-          attempts: 3,
-          backoff: {
-            type: 'exponential',
-            delay: 1000
-          }
-        }
-      );
-      
-      expect(job.opts.attempts).toBe(3);
-      expect(job.opts.backoff).toEqual({
-        type: 'exponential',
-        delay: 1000
-      });
-    });
-    
+
     it('should handle multiple concurrent jobs', async () => {
-      const jobs = [];
-      
+      const orderIds: string[] = [];
+
       for (let i = 0; i < 5; i++) {
-        const job = queue.add(
-          `concurrent-${Date.now()}-${i}`,
-          {
-            orderId: `CONCURRENT-${i}`,
-            orderData: {
-              orderType: 'market',
-              tokenIn: 'SOL',
-              tokenOut: 'USDC',
-              amountIn: 1
-            }
-          }
-        );
-        jobs.push(job);
+        const orderId = `CONCURRENT-${Date.now()}-${i}`;
+        orderIds.push(orderId);
+        await db.createOrder(orderId, {
+          orderType: 'market',
+          tokenIn: 'SOL',
+          tokenOut: 'USDC',
+          amountIn: 1
+        });
+        worker.enqueue(orderId, {
+          orderType: 'market',
+          tokenIn: 'SOL',
+          tokenOut: 'USDC',
+          amountIn: 1
+        });
       }
-      
-      const results = await Promise.all(jobs);
-      expect(results.length).toBe(5);
-      
-      // All jobs should have unique IDs
-      const ids = results.map(j => j.id);
-      const uniqueIds = new Set(ids);
-      expect(uniqueIds.size).toBe(5);
+
+      // Wait for all to be processed
+      const results = await Promise.all(orderIds.map(id => waitForStatus(id, 20000)));
+      results.forEach(r => expect(r.status).not.toBe('pending'));
     });
   });
   

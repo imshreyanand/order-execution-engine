@@ -8,9 +8,15 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "db:apply": "tsx scripts/applySchema.ts"
   },
-  "keywords": ["solana", "dex", "trading", "websocket"],
+  "keywords": [
+    "solana",
+    "dex",
+    "trading",
+    "websocket"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {

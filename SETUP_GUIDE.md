@@ -26,6 +26,26 @@ If you don't have them, install:
 - **PostgreSQL**: https://www.postgresql.org/download/
 - **Redis**: https://redis.io/download/
 
+## Option 0: Supabase (no local DB install — recommended for quick setup)
+
+If you don't want to install PostgreSQL locally, Supabase provides a free hosted Postgres and an in-browser SQL editor.
+
+Steps:
+
+1. Create a free account at https://app.supabase.com and create a new project (choose a password and database name).
+2. Go to **Database → SQL Editor** and open the local file `database/schema.sql`, paste its contents there and run it to create the tables.
+3. In **Settings → Database → Connection string**, copy the `postgres://...` connection string and add it to your `.env` as `DATABASE_URL`.
+4. Optionally, run the schema applier locally instead of using the SQL editor:
+
+```bash
+# Ensure DATABASE_URL is set (supabase connection string)
+npm run db:apply
+```
+
+> Tip: Using `DATABASE_URL` is convenient for hosted DBs like Supabase — our app will prefer `DATABASE_URL` if present.
+
+---
+
 ## Option 1: Quick Start with Docker (Easiest)
 
 If you have Docker installed, this is the fastest way:
@@ -89,7 +109,9 @@ createdb -U postgres order_engine
 psql -U postgres order_engine < database/schema.sql
 ```
 
-### Step 3: Start Redis
+### Step 3 (Optional): Start Redis (only for distributed processing)
+
+The application uses an in-memory queue and pubsub by default for local development. If you want to run distributed workers with BullMQ, start Redis and configure `REDIS_HOST` / `REDIS_PORT`.
 
 **On macOS:**
 
@@ -129,8 +151,9 @@ Your `.env` should look like:
 PORT=3000
 NODE_ENV=development
 
-REDIS_HOST=localhost
-REDIS_PORT=6379
+# Optional Redis (only required for distributed BullMQ workers)
+# REDIS_HOST=localhost
+# REDIS_PORT=6379
 
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
@@ -161,7 +184,7 @@ You should see:
 ✅ Database connected successfully
 ✅ Server initialized successfully
 🚀 Server running on http://localhost:3000
-📡 WebSocket endpoint: ws://localhost:3000/api/orders/execute
+📡 WebSocket endpoint: ws://localhost:3000/ws?orderId=<order-id>
 ```
 
 ## Testing the Setup

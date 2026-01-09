@@ -19,11 +19,11 @@ I chose to implement **Market Orders** because they represent the most fundament
 
 ### Architecture Highlights
 
-**HTTP → WebSocket Upgrade Pattern**
+**Submission + Subscription Pattern**
 
-- Single endpoint handles both protocols
-- User submits POST, immediately receives WebSocket connection
-- No need for separate connection management
+- Submit orders via `POST /api/orders/execute`
+- Subscribe to updates via WebSocket at `GET /ws?orderId=<order-id>`
+- Separate endpoints make client integration simple and explicit
 - Real-time status updates without polling
 
 **DEX Router Strategy**
@@ -35,16 +35,17 @@ I chose to implement **Market Orders** because they represent the most fundament
 
 **Queue-Based Processing**
 
-- BullMQ manages up to 10 concurrent orders
-- Rate limiting: 100 orders/minute
-- Exponential backoff retry (1s → 2s → 4s)
+- In-memory queue manages concurrent orders (default for local development)
+- Optional: BullMQ + Redis for distributed processing
+- Rate limiting and exponential backoff retry implemented in worker
 - Graceful failure handling with detailed error logging
 
 ## 🏗️ Tech Stack
 
 - **Node.js + TypeScript** - Type-safe backend development
 - **Fastify** - High-performance HTTP server with built-in WebSocket support
-- **BullMQ + Redis** - Distributed job queue for order processing
+- **In-memory queue (default)** - Local dev-friendly order queue
+- **(Optional) BullMQ + Redis** - For distributed job processing
 - **PostgreSQL** - Persistent order history and state
 - **Zod** - Runtime type validation
 
@@ -52,7 +53,7 @@ I chose to implement **Market Orders** because they represent the most fundament
 
 - Node.js 18+
 - PostgreSQL 14+
-- Redis 6+
+- Redis 6+ (optional — only required for distributed job processing)
 
 ## 🚀 Quick Start
 
@@ -65,6 +66,24 @@ npm install
 ```
 
 ### 2. Database Setup
+
+You have two simple options:
+
+- Use a managed Postgres provider like **Supabase** (recommended for quick setup)
+- Set up Postgres locally (if you prefer development without external services)
+
+Supabase (quick):
+
+1. Create a free project at https://app.supabase.com
+2. Run the contents of `database/schema.sql` in **Database → SQL Editor**
+3. Copy the connection string from **Settings → Database → Connection string** and set it in your `.env` as `DATABASE_URL`.
+4. Optionally apply the schema from your machine with:
+
+```bash
+npm run db:apply
+```
+
+Local Postgres:
 
 ```bash
 # Create PostgreSQL database
@@ -216,7 +235,7 @@ order-execution-engine/
 │   ├── services/
 │   │   ├── mockDexRouter.ts      # DEX price comparison & execution
 │   │   ├── database.ts           # PostgreSQL operations
-│   │   ├── queueWorker.ts        # BullMQ job processor
+│   │   ├── queueWorker.ts        # In-memory queue worker (default)
 │   │   └── __tests__/
 │   │       └── mockDexRouter.test.ts
 │   ├── __tests__/
@@ -236,7 +255,7 @@ order-execution-engine/
 ### Order Lifecycle
 
 1. **Submission**: User POSTs order → Server validates → Creates DB record → Returns orderId
-2. **Queue**: Order added to BullMQ with retry configuration
+2. **Queue**: Order added to in-memory queue (or BullMQ if configured) with retry configuration
 3. **Connection Upgrade**: Same HTTP connection becomes WebSocket for live updates
 4. **Routing**: Worker queries Raydium + Meteora in parallel → Selects best price
 5. **Execution**: Builds transaction → Submits to selected DEX → Waits for confirmation

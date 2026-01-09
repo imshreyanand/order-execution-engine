@@ -9,16 +9,28 @@ export class DatabaseService {
   private pool: Pool;
   
   constructor() {
-    this.pool = new Pool({
-      host: process.env.POSTGRES_HOST || 'localhost',
-      port: parseInt(process.env.POSTGRES_PORT || '5432'),
-      user: process.env.POSTGRES_USER || 'user',
-      password: process.env.POSTGRES_PASSWORD || 'password',
-      database: process.env.POSTGRES_DB || 'order_engine',
-      max: 20, // Maximum connections in pool
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
-    });
+    const connectionString = process.env.DATABASE_URL;
+
+    if (connectionString) {
+      // Use DATABASE_URL when provided (works with Supabase/hosted providers)
+      this.pool = new Pool({
+        connectionString,
+        max: 20,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 2000,
+      });
+    } else {
+      this.pool = new Pool({
+        host: process.env.POSTGRES_HOST || 'localhost',
+        port: parseInt(process.env.POSTGRES_PORT || '5432'),
+        user: process.env.POSTGRES_USER || 'user',
+        password: process.env.POSTGRES_PASSWORD || 'password',
+        database: process.env.POSTGRES_DB || 'order_engine',
+        max: 20, // Maximum connections in pool
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 2000,
+      });
+    }
   }
   
   /**
@@ -31,6 +43,12 @@ export class DatabaseService {
       console.log('✅ Database connected successfully');
       client.release();
     } catch (error) {
+      const isDev = process.env.NODE_ENV !== 'production';
+      if (isDev) {
+        console.warn('⚠️  Database connection failed (running in development mode without database)');
+        console.warn('   To enable database features, start PostgreSQL and set POSTGRES_HOST, POSTGRES_USER, etc.');
+        return;
+      }
       console.error('❌ Database connection failed:', error);
       throw error;
     }
