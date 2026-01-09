@@ -1,35 +1,42 @@
 -- Order Execution Engine Database Schema
 
+-- Orders table - stores all order history
 CREATE TABLE IF NOT EXISTS orders (
-  id VARCHAR(255) PRIMARY KEY,
-  userId VARCHAR(255) NOT NULL,
-  tokenIn VARCHAR(255) NOT NULL,
-  tokenOut VARCHAR(255) NOT NULL,
-  amountIn VARCHAR(255) NOT NULL,
-  minAmountOut VARCHAR(255) NOT NULL,
-  status VARCHAR(50) NOT NULL DEFAULT 'pending',
-  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_userId (userId),
-  INDEX idx_status (status)
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id VARCHAR(50) UNIQUE NOT NULL,
+    order_type VARCHAR(20) NOT NULL, -- 'market', 'limit', 'sniper'
+    token_in VARCHAR(50) NOT NULL,
+    token_out VARCHAR(50) NOT NULL,
+    amount_in DECIMAL(20, 8) NOT NULL,
+    amount_out DECIMAL(20, 8),
+    status VARCHAR(20) NOT NULL, -- 'pending', 'routing', 'building', 'submitted', 'confirmed', 'failed'
+    selected_dex VARCHAR(20), -- 'raydium' or 'meteora'
+    raydium_price DECIMAL(20, 8),
+    meteora_price DECIMAL(20, 8),
+    executed_price DECIMAL(20, 8),
+    tx_hash VARCHAR(100),
+    slippage DECIMAL(5, 4) DEFAULT 0.01, -- 1% default
+    error_message TEXT,
+    retry_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    confirmed_at TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS execution_results (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  orderId VARCHAR(255) NOT NULL,
-  amountOut VARCHAR(255),
-  transactionHash VARCHAR(255),
-  success BOOLEAN NOT NULL,
-  error TEXT,
-  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (orderId) REFERENCES orders(id)
-);
+-- Index for faster queries
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_order_id ON orders(order_id);
 
-CREATE TABLE IF NOT EXISTS execution_logs (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  orderId VARCHAR(255),
-  message TEXT NOT NULL,
-  level VARCHAR(50),
-  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_orderId (orderId)
-);
+-- Function to update updated_at timestamp
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Trigger to auto-update updated_at
+CREATE TRIGGER update_orders_updated_at BEFORE UPDATE ON orders
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
