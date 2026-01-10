@@ -266,6 +266,8 @@ Connect and submit order:
 
 ```bash
 # This won't work directly because WebSocket needs HTTP upgrade
+
+Note: The server supports upgrading the initial POST `/api/orders/execute` connection to a WebSocket. You can send the POST with `Upgrade: websocket` headers and include the JSON body — the server will accept the upgrade and stream order status on the same connection.
 # Use Postman or write a small Node.js script
 
 # Example Node.js script:

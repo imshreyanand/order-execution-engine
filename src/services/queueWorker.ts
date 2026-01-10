@@ -14,9 +14,10 @@ export class QueueWorker {
   private concurrency: number;
   private maxRetries: number;
 
-  constructor(db: DatabaseService) {
+  // Accept optional dexRouter for easier testing and future real implementations
+  constructor(db: DatabaseService, dexRouter?: MockDexRouter) {
     this.db = db;
-    this.dexRouter = new MockDexRouter();
+    this.dexRouter = dexRouter ?? new MockDexRouter();
     this.concurrency = parseInt(process.env.MAX_CONCURRENT_ORDERS || '10');
     this.maxRetries = parseInt(process.env.MAX_RETRY_ATTEMPTS || '3');
 
@@ -76,6 +77,56 @@ export class QueueWorker {
       const result = await this.dexRouter.executeSwap(routingDecision.selectedDex, orderData, routingDecision.selectedQuote);
 
       if (result.success) {
+        // Enforce slippage tolerance (with adaptive increase per attempt)
+        const baseSlippage = job.orderData.slippage ?? 0.01;
+        const effectiveSlippage = Math.min(0.2, baseSlippage * (1 + job.attempts * 0.5)); // increase 50% per attempt, cap at 20%
+
+        const expectedAmountOut = routingDecision.selectedQuote.amountOut;
+        const minAmountOut = expectedAmountOut * (1 - effectiveSlippage);
+
+        if (typeof result.amountOut !== 'number' || result.amountOut < minAmountOut) {
+          // Log details for debugging
+          console.warn(`🔻 [${orderId}] Slippage check failed (dex=${routingDecision.selectedDex}) — expected=${expectedAmountOut.toFixed(6)}, min=${minAmountOut.toFixed(6)}, actual=${(result.amountOut ?? 0).toFixed(6)}, slippageAllowed=${(effectiveSlippage * 100).toFixed(2)}%`);
+
+          // Try fallback to the other DEX once before treating as failure
+          if (!(job as any).triedFallback) {
+            (job as any).triedFallback = true;
+            const otherQuote = routingDecision.selectedDex === 'raydium' ? routingDecision.meteoraQuote : routingDecision.raydiumQuote;
+            const otherDex = otherQuote.dex;
+
+            console.log(`🔁 [${orderId}] Attempting fallback to ${otherDex} due to slippage`);
+            const fallbackResult = await this.dexRouter.executeSwap(otherDex, job.orderData, otherQuote as any);
+
+            if (fallbackResult.success) {
+              const otherExpected = otherQuote.amountOut;
+              const otherMin = otherExpected * (1 - effectiveSlippage);
+
+              if (typeof fallbackResult.amountOut === 'number' && fallbackResult.amountOut >= otherMin) {
+                // Accept fallback result
+                await this.db.updateOrderStatus(orderId, 'confirmed', {
+                  txHash: fallbackResult.txHash,
+                  executedPrice: fallbackResult.executedPrice,
+                  amountOut: fallbackResult.amountOut
+                });
+
+                await this.publishStatus(orderId, 'confirmed', {
+                  txHash: fallbackResult.txHash,
+                  executedPrice: fallbackResult.executedPrice,
+                  amountOut: fallbackResult.amountOut
+                });
+
+                console.log(`✅ [${orderId}] Completed via fallback on ${otherDex}`);
+                return; // job done
+              }
+            }
+
+            // If fallback didn't succeed, publish a retrying status and proceed to retry logic below
+            await this.publishStatus(orderId, 'retrying', { reason: 'slippage', attemptedDex: routingDecision.selectedDex, fallbackTried: true, allowedSlippage: effectiveSlippage });
+          }
+
+          throw new Error('Slippage tolerance exceeded');
+        }
+
         await this.db.updateOrderStatus(orderId, 'confirmed', {
           txHash: result.txHash,
           executedPrice: result.executedPrice,

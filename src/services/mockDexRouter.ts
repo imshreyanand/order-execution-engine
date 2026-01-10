@@ -15,8 +15,8 @@ export class MockDexRouter {
    * Simulates network delay and returns price with variance
    */
   async getRaydiumQuote(tokenIn: string, tokenOut: string, amountIn: number): Promise<DexQuote> {
-    // Simulate network latency
-    await this.sleep(150 + Math.random() * 100);
+    // Simulate network latency (200-500ms)
+    await this.sleep(200 + Math.random() * 300);
     
     // Calculate price with 2-4% variance from base
     const priceVariance = 0.98 + Math.random() * 0.04;
@@ -40,7 +40,8 @@ export class MockDexRouter {
    * Meteora often has slightly better prices but varies
    */
   async getMeteorQuote(tokenIn: string, tokenOut: string, amountIn: number): Promise<DexQuote> {
-    await this.sleep(150 + Math.random() * 100);
+    // Simulate network latency (200-500ms)
+    await this.sleep(200 + Math.random() * 300);
     
     // Meteora price variance 1-5% from base
     const priceVariance = 0.97 + Math.random() * 0.05;
@@ -100,18 +101,25 @@ export class MockDexRouter {
       // Simulate transaction submission and confirmation (2-3 seconds)
       await this.sleep(2000 + Math.random() * 1000);
       
-      // 95% success rate (simulate occasional failures)
+      // Simulate execution slippage (0% - 2% typical, small chance of large slippage)
+      const typicalSlippage = Math.random() * 0.02; // up to 2%
+      const bigSlippage = Math.random() < 0.03 ? (0.05 + Math.random() * 0.2) : 0; // 3% chance of large slippage 5-25%
+      const totalSlippage = typicalSlippage + bigSlippage;
+
+      const actualAmountOut = quote.amountOut * (1 - totalSlippage);
+      const executedPrice = actualAmountOut / (orderData.amountIn);
+
+      // 95% success rate but even successful execution can have slippage
       if (Math.random() < 0.95) {
         return {
           success: true,
           txHash: this.generateMockTxHash(),
-          executedPrice: quote.price,
-          amountOut: quote.amountOut
+          executedPrice,
+          amountOut: actualAmountOut
         };
       } else {
         // Simulate failure scenarios
         const errors = [
-          'Slippage tolerance exceeded',
           'Insufficient liquidity',
           'Transaction timeout',
           'RPC node error'

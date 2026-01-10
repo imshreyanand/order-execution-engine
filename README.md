@@ -355,3 +355,5 @@ Shreya - shreyanand.jpr@gmail.com
 ---
 
 **Note**: This implementation uses mock DEX responses for development/demonstration. For production use with real funds, integrate actual Raydium and Meteora SDKs and thoroughly test on devnet before mainnet deployment.
+
+**Mock improvements (Option B)**: The mock DEX router now simulates realistic delays (quotes ~200-500ms, execution 2-3s), variable execution slippage, and occasional failures. The engine enforces user `slippage` (min amount out) and will fail + retry if slippage is exceeded. Also, the server supports upgrading the initial POST `/api/orders/execute` connection to a WebSocket so clients can submit and receive updates on the same connection.

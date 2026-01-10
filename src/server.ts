@@ -1,5 +1,6 @@
 import Fastify, { FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
+import { WebSocketServer } from 'ws';
 import { z } from 'zod';
 import DatabaseService from './services/database';
 import QueueWorker from './services/queueWorker';
@@ -47,7 +48,129 @@ export class OrderExecutionServer {
     
     // In-memory queue and pubsub are used by default (no Redis required)
     console.log('ℹ️  Using in-memory order queue and pubsub (no Redis required)');
-    
+
+    // Custom content-type parser: skip body parsing for upgrade requests
+    this.app.addContentTypeParser('application/json', (request, payload, done) => {
+      if (request.headers.upgrade === 'websocket') {
+        // Skip body parsing for websocket upgrades — the upgrade listener handles it
+        done(null, {});
+      } else {
+        // Normal JSON parsing for non-upgrade requests
+        let data = '';
+        payload.on('data', chunk => (data += chunk.toString()));
+        payload.on('end', () => {
+          try {
+            done(null, data ? JSON.parse(data) : {});
+          } catch (err) {
+            done(err as any, undefined);
+          }
+        });
+        payload.on('error', done);
+      }
+    });
+
+    // Also support same-connection POST -> WebSocket upgrade for /api/orders/execute
+    // This is a lightweight handler that buffers a short HTTP body and then upgrades the connection.
+    const wssExec = new WebSocketServer({ noServer: true });
+
+    (this.app.server as any).on('upgrade', (req: any, socket: any, head: any) => {
+      try {
+        console.log(`🔄 Upgrade event for ${req.url}`);
+        if (!req.url) return;
+        const url = req.url.split('?')[0];
+        if (url !== '/api/orders/execute') {
+          console.log(`  ↳ Not /api/orders/execute, skipping`);
+          return;
+        }
+        console.log(`  ↳ Processing upgrade...`);
+
+        // Buffer incoming body for a short window (200ms) then proceed
+        const chunks: Buffer[] = [];
+        req.on('data', (chunk: Buffer) => {
+          console.log(`  📦 Received ${chunk.length} bytes`);
+          chunks.push(chunk);
+        });
+
+        const waitForBody = new Promise<Buffer>((resolve) => {
+          const timer = setTimeout(() => {
+            console.log(`  ⏱️  Timeout waiting for body`);
+            resolve(Buffer.concat(chunks));
+          }, 200);
+          req.on('end', () => {
+            clearTimeout(timer);
+            console.log(`  ✅ Body complete, total ${Buffer.concat(chunks).length} bytes`);
+            resolve(Buffer.concat(chunks));
+          });
+        });
+
+        waitForBody.then(async (buf) => {
+          console.log(`  🔍 Parsing body...`);
+          let body: any = {};
+          try {
+            if (buf && buf.length) {
+              const str = buf.toString();
+              console.log(`  📄 Body string: ${str.substring(0, 100)}...`);
+              body = JSON.parse(str);
+              console.log(`  ✅ Parsed JSON:`, body);
+            } else {
+              console.log(`  ⚠️  Empty body buffer`);
+            }
+          } catch (err) {
+            console.log(`  ❌ JSON parse error:`, err);
+          }
+
+          // Validate order body quickly
+          try {
+            console.log(`  🔎 Validating order schema...`);
+            const orderData = CreateOrderSchema.parse(body);
+            console.log(`  ✅ Order valid:`, orderData);
+            // Generate unique order ID
+            const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+            // Create order in database (best effort)
+            try {
+              await this.db.createOrder(orderId, orderData);
+            } catch (err) {
+              console.warn(`  Order creation skipped (database unavailable)`);
+            }
+
+            // Enqueue
+            this.worker.enqueue(orderId, orderData);
+            console.log(`📝 [${orderId}] Order created and enqueued via upgraded connection`);
+
+            // Upgrade to WebSocket and attach pubsub forwarding
+            wssExec.handleUpgrade(req, socket, head, (ws) => {
+              // Send initial pending message
+              const subscribeAck = { success: true, message: `Subscribed to order ${orderId}` };
+              try { ws.send(JSON.stringify(subscribeAck)); } catch (e) {}
+
+              // Immediately send pending status
+              const pending = { orderId, status: 'pending', timestamp: new Date().toISOString(), data: { message: 'Order received and queued for execution' } };
+              try { ws.send(JSON.stringify(pending)); } catch (e) {}
+
+              const unsubscribe = pubsub.subscribeOrder(orderId, (message) => {
+                if (ws.readyState === 1) {
+                  try { ws.send(JSON.stringify(message)); } catch (e) {}
+                }
+              });
+
+              ws.on('close', () => unsubscribe());
+            });
+          } catch (err) {
+            console.log(`  ❌ Validation or upgrade error:`, err);
+            // Invalid body — return HTTP 400-like response over socket and close
+            try {
+              socket.write('HTTP/1.1 400 Bad Request\r\n\r\nInvalid order body');
+            } catch (e) {}
+            socket.destroy();
+          }
+        });
+      } catch (err) {
+        console.error(`  ❌ Upgrade listener error:`, err);
+        socket.destroy();
+      }
+    });
+
     // Register routes
     this.registerRoutes();
     
@@ -63,8 +186,9 @@ export class OrderExecutionServer {
       return { status: 'ok', timestamp: new Date().toISOString() };
     });
     
-    // REST API for order submission
-    this.app.post('/api/orders/execute', async (request, reply) => {
+    // REST API for order submission (non-upgrade requests only)
+    // Upgrade requests are handled by the upgrade listener below
+    this.app.post<{ Body: any }>('/api/orders/execute', async (request, reply) => {
       try {
         const body = request.body as any;
         const orderData = CreateOrderSchema.parse(body);
